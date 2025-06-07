@@ -1,0 +1,127 @@
+package Form;
+
+import DATABASE.Koneksi;
+import javax.swing.*;
+import java.awt.*;
+import java.sql.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
+public class LoginForm extends JFrame {
+    private JTextField usernameField;
+    private JPasswordField passwordField;
+    private JButton loginButton;
+    private Connection connection;
+
+    public LoginForm() {
+        this.setTitle("Login Form");
+        this.setSize(350, 400);
+        this.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        this.setResizable(false);
+        this.setLocationRelativeTo(null);
+        this.connection = Koneksi.getConnection(); // Pastikan koneksi database aktif
+
+        initComponents();
+        this.setVisible(true);
+    }
+
+    private void initComponents() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(30, 30, 30, 30));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        JLabel titleLabel = new JLabel("Login Catering");
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 20));
+        titleLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        panel.add(titleLabel, gbc);
+
+        gbc.gridwidth = 1;
+        gbc.gridy++;
+        panel.add(new JLabel("Username:"), gbc);
+
+        gbc.gridx = 1;
+        usernameField = new JTextField(15);
+        panel.add(usernameField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy++;
+        panel.add(new JLabel("Password:"), gbc);
+
+        gbc.gridx = 1;
+        passwordField = new JPasswordField(15);
+        panel.add(passwordField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.gridwidth = 2;
+        gbc.anchor = GridBagConstraints.CENTER;
+        loginButton = new JButton("Login");
+        panel.add(loginButton, gbc);
+
+        loginButton.addActionListener(e -> loginUser());
+        passwordField.addActionListener(e -> loginUser());  // tekan Enter langsung login
+
+        this.add(panel);
+    }
+
+    private void loginUser() {
+        String username = usernameField.getText().trim();
+        String password = new String(passwordField.getPassword()).trim();
+
+        if (username.isEmpty() || password.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Username dan password tidak boleh kosong", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        try {
+            String query = "SELECT * FROM tb_user WHERE Username = ? AND Password = ?";
+            PreparedStatement stmt = connection.prepareStatement(query);
+            stmt.setString(1, username);
+            stmt.setString(2, password);
+            ResultSet rs = stmt.executeQuery();
+
+            if (rs.next()) {
+                // Waktu login saat ini
+                LocalDateTime now = LocalDateTime.now();
+                Timestamp loginTime = Timestamp.valueOf(now);
+
+                // Update last_login
+                String updateQuery = "UPDATE tb_user SET last_login = ? WHERE Username = ?";
+                PreparedStatement updateStmt = connection.prepareStatement(updateQuery);
+                updateStmt.setTimestamp(1, loginTime);
+                updateStmt.setString(2, username);
+                updateStmt.executeUpdate();
+                updateStmt.close();
+
+                // Format waktu untuk ditampilkan
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");
+                String formattedLoginTime = now.format(formatter);
+
+                JOptionPane.showMessageDialog(this, "Login berhasil, selamat datang " + username + "\nWaktu login: " + formattedLoginTime);
+
+                // Buka dashboard
+                DashboardCatering dashboard = new DashboardCatering(username, loginTime);
+                dashboard.setVisible(true); // <-- Tambahkan ini agar window tampil
+                this.dispose();
+
+            } else {
+                JOptionPane.showMessageDialog(this, "Username atau Password salah", "Login Gagal", JOptionPane.ERROR_MESSAGE);
+            }
+
+            stmt.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Gagal terhubung ke database", "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    public static void main(String[] args) {
+        new LoginForm();
+    }
+}
