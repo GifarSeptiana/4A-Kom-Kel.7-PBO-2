@@ -1,0 +1,158 @@
+package Form;
+
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import java.awt.*;
+import java.time.LocalDateTime;
+
+import java.time.format.DateTimeFormatter;
+
+public class DashboardCatering extends JFrame {
+    private JPanel contentPanel;
+    private String username;
+    private LocalDateTime lastLogin;
+
+    public DashboardCatering(String username, java.sql.Timestamp loginTime) {
+        this.username = username;
+        this.lastLogin = loginTime.toLocalDateTime();
+
+        setTitle("PINGKY CATERING - Dashboard");
+
+        // Set ikon jendela aplikasi (title bar)
+        try {
+            Image icon = Toolkit.getDefaultToolkit().getImage("gambar/image/logo.jpg");
+            setIconImage(icon);
+        } catch (Exception e) {
+            System.out.println("Gagal load ikon: " + e.getMessage());
+        }
+
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        setSize(screenSize.width, screenSize.height);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout());
+
+        initHeader();
+        initSidebar();
+        initContentPanel();
+
+
+
+
+
+        switchPanel("Beranda");
+    }
+
+
+    private void initHeader() {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(new Color(228, 17, 115));
+        header.setBorder(new EmptyBorder(10, 20, 10, 20));
+
+        // Logo
+        try {
+            ImageIcon logoIcon = new ImageIcon("gambar/image/logo.jpg");
+            Image logoImg = logoIcon.getImage().getScaledInstance(60, 60, Image.SCALE_SMOOTH);
+            JLabel logoLabel = new JLabel(new ImageIcon(logoImg));
+            header.add(logoLabel, BorderLayout.WEST);
+        } catch (Exception e) {
+            System.out.println("Gagal load logo: " + e.getMessage());
+        }
+
+        // Judul aplikasi
+        JLabel titleLabel = new JLabel("PINGKY CATERING", SwingConstants.LEFT);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 28));
+        titleLabel.setForeground(Color.WHITE);
+
+        JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        leftPanel.setBackground(new Color(228, 17, 115));
+        leftPanel.add(titleLabel);
+
+        header.add(leftPanel, BorderLayout.CENTER);
+
+        // Info user
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");
+        JLabel userLabel = new JLabel("Login oleh: " + username + " | Waktu login: " + lastLogin.format(formatter));
+        userLabel.setFont(new Font("Arial", Font.PLAIN, 14));
+        userLabel.setForeground(Color.WHITE);
+        userLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+
+        header.add(userLabel, BorderLayout.EAST);
+
+        add(header, BorderLayout.NORTH);
+    }
+
+    private void initSidebar() {
+        JPanel menuPanel = new JPanel(new GridLayout(0, 1, 5, 5));
+        menuPanel.setBorder(new EmptyBorder(15, 10, 15, 10));
+        menuPanel.setBackground(Color.LIGHT_GRAY);
+
+        String[] menuItems = {"Beranda", "Profil & History", "Menu", "Pemesanan", "Transaksi", "Laporan Keuangan", "Logout"};
+        for (String item : menuItems) {
+            JButton btn = new JButton(item);
+            btn.setFont(new Font("Arial", Font.PLAIN, 18));
+            btn.addActionListener(e -> switchPanel(item));
+            menuPanel.add(btn);
+        }
+
+        add(menuPanel, BorderLayout.WEST);
+    }
+
+    private void initContentPanel() {
+        contentPanel = new JPanel(new BorderLayout());
+        contentPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
+        add(contentPanel, BorderLayout.CENTER);
+    }
+
+    private void switchPanel(String menu) {
+        contentPanel.removeAll();
+
+        switch (menu) {
+            case "Beranda":
+                contentPanel.add(new BerandaPanel(username), BorderLayout.CENTER);
+                break;
+
+            case "Profil & History":
+                contentPanel.add(new ProfilHistoryPanel(), BorderLayout.CENTER);
+                break;
+
+
+            case "Menu":
+                contentPanel.add(new MenuPanel(), BorderLayout.CENTER);
+                break;
+
+            case "Pemesanan":
+                contentPanel.add(new PemesananPanel(), BorderLayout.CENTER);
+                break;
+
+            case "Transaksi":
+                contentPanel.add(new TransaksiPanel(), BorderLayout.CENTER);
+                break;
+
+            case "Laporan Keuangan":
+                contentPanel.add(new LaporanKeuangan(), BorderLayout.CENTER);
+                break;
+
+            case "Logout":
+                int confirm = JOptionPane.showConfirmDialog(this, "Yakin ingin logout?", "Konfirmasi Logout", JOptionPane.YES_NO_OPTION);
+                if (confirm == JOptionPane.YES_OPTION) {
+                    this.dispose();
+                    new LoginForm(); // pastikan class ini tersedia
+                }
+                return;
+
+            default:
+                contentPanel.add(new JLabel("Fitur belum tersedia.", SwingConstants.CENTER), BorderLayout.CENTER);
+        }
+
+        contentPanel.revalidate();
+        contentPanel.repaint();
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            java.sql.Timestamp fakeLogin = java.sql.Timestamp.valueOf(LocalDateTime.now());
+            new DashboardCatering("Admin", fakeLogin).setVisible(true);
+        });
+    }
+}
