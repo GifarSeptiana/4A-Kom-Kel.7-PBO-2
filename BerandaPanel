@@ -1,0 +1,147 @@
+package Form;
+
+import DATABASE.Koneksi;
+
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.sql.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
+public class BerandaPanel extends JPanel {
+    private JTable table;
+    private DefaultTableModel model;
+    private JButton btnSelesai;
+
+    public BerandaPanel(String username) {
+        setLayout(new BorderLayout(10, 10));
+        setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        // Header
+        JLabel header = new JLabel("Daftar Pengambilan Belum Selesai", SwingConstants.CENTER);
+        header.setFont(new Font("Arial", Font.BOLD, 24));
+        add(header, BorderLayout.NORTH);
+
+        // Tabel dengan model non-editable
+        model = new DefaultTableModel(new String[]{
+                "Nama", "No HandPhone", "Menu", "Jumlah", "Harga", "Total", "Tanggal Ambil"
+        }, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false; // Semua sel tidak bisa diubah
+            }
+        };
+
+        table = new JTable(model);
+        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        add(new JScrollPane(table), BorderLayout.CENTER);
+
+        // Tombol
+        btnSelesai = new JButton("Pengambilan Selesai");
+        btnSelesai.addActionListener(e -> prosesPengambilan());
+        add(btnSelesai, BorderLayout.SOUTH);
+
+        // Load data yang belum diambil
+        loadDataBelumDiambil();
+    }
+
+    private void loadDataBelumDiambil() {
+        model.setRowCount(0);
+        String sql = "SELECT * FROM transaksi WHERE status != 'Diambil' ORDER BY tanggal_ambil ASC";
+        try (Connection conn = Koneksi.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                model.addRow(new Object[]{
+                        rs.getString("nama"),
+                        rs.getString("no_hp"),
+                        rs.getString("menu"),
+                        rs.getInt("jumlah"),
+                        rs.getDouble("harga_satuan"),
+                        rs.getDouble("total_harga"),
+                        rs.getDate("tanggal_ambil")
+                });
+            }
+
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Gagal mengambil data: " + e.getMessage());
+        }
+    }
+
+    private void prosesPengambilan() {
+        int selectedRow = table.getSelectedRow();
+        if (selectedRow == -1) {
+            JOptionPane.showMessageDialog(this, "Pilih data yang ingin diselesaikan.");
+            return;
+        }
+
+        String nama = model.getValueAt(selectedRow, 0).toString();
+        String noHp = model.getValueAt(selectedRow, 1).toString();
+        String menu = model.getValueAt(selectedRow, 2).toString();
+        int jumlah = (int) model.getValueAt(selectedRow, 3);
+        double harga = (double) model.getValueAt(selectedRow, 4);
+        double total = (double) model.getValueAt(selectedRow, 5);
+        Date tanggalAmbil = (Date) model.getValueAt(selectedRow, 6);
+
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Konfirmasi pengambilan oleh: " + nama,
+                "Konfirmasi", JOptionPane.YES_NO_OPTION);
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            String struk = generateStruk(nama, menu, jumlah, harga, total);
+
+            try (Connection conn = Koneksi.getConnection()) {
+                // Cari ID transaksi berdasarkan data lengkap
+                String findSQL = "SELECT id FROM transaksi WHERE no_hp = ? AND nama = ? AND menu = ? AND jumlah = ? AND total_harga = ? AND tanggal_ambil = ? AND status != 'Diambil' LIMIT 1";
+                PreparedStatement findStmt = conn.prepareStatement(findSQL);
+                findStmt.setString(1, noHp);
+                findStmt.setString(2, nama);
+                findStmt.setString(3, menu);
+                findStmt.setInt(4, jumlah);
+                findStmt.setDouble(5, total);
+                findStmt.setDate(6, tanggalAmbil);
+
+                ResultSet rs = findStmt.executeQuery();
+
+                if (rs.next()) {
+                    int id = rs.getInt("id");
+
+                    // Update status menjadi Diambil
+                    String updateSQL = "UPDATE transaksi SET status = 'Diambil' WHERE id = ?";
+                    PreparedStatement updateStmt = conn.prepareStatement(updateSQL);
+                    updateStmt.setInt(1, id);
+                    updateStmt.executeUpdate();
+
+                    // Tambahkan ke log (bukan transaksi keuangan, hanya catatan)
+                    String logSQL = "INSERT INTO log_transaksi (nama, no_hp, total_bayar, struk, tanggal_transaksi) VALUES (?, ?, ?, ?, ?)";
+                    PreparedStatement logStmt = conn.prepareStatement(logSQL);
+                    logStmt.setString(1, nama);
+                    logStmt.setString(2, noHp);
+                    logStmt.setDouble(3, 0); // Tidak termasuk total
+                    logStmt.setString(4, struk);
+                    logStmt.setTimestamp(5, Timestamp.valueOf(LocalDateTime.now()));
+                    logStmt.executeUpdate();
+
+                    JOptionPane.showMessageDialog(this, "Pengambilan selesai dicatat.");
+                    loadDataBelumDiambil();
+                } else {
+                    JOptionPane.showMessageDialog(this, "Transaksi tidak ditemukan.");
+                }
+
+            } catch (SQLException e) {
+                JOptionPane.showMessageDialog(this, "Gagal menyimpan log: " + e.getMessage());
+            }
+        }
+    }
+
+    private String generateStruk(String nama, String menu, int jumlah, double harga, double total) {
+        return "STRUK PENGAMBILAN\n\n" +
+                "Nama: " + nama + "\n" +
+                menu + " x" + jumlah + " @ " + harga + " = " + total + "\n\n" +
+                "Status: Diambil\nTanggal & Waktu: " +
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss"));
+    }
+}
