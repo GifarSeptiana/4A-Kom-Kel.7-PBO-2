@@ -1,0 +1,265 @@
+package Form;
+
+import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.sql.*;
+import java.util.Date;
+import java.util.HashMap;
+import java.time.LocalDate;
+
+public class PemesananPanel extends JPanel {
+    private JTextField namaField, noHpField, jumlahField;
+    private JComboBox<String> menuComboBox;
+    private JButton tambahMenuBtn, lanjutTransaksiBtn, hapusMenuBtn;
+    private JTable daftarMenuTable;
+    private DefaultTableModel tableModel;
+    private JLabel totalHargaLabel;
+    private JSpinner tanggalSpinner;
+
+    private final String DB_URL = "jdbc:mysql://localhost:3306/db_catering";
+    private final String DB_USER = "root";
+    private final String DB_PASS = "";
+
+    private Connection connection;
+    private HashMap<String, Double> menuHargaMap = new HashMap<>();
+
+    public PemesananPanel() {
+        setLayout(new BorderLayout(10, 10));
+        JPanel formPanel = new JPanel(new GridLayout(5, 2, 5, 5));
+
+        namaField = new JTextField();
+        noHpField = new JTextField();
+        tanggalSpinner = new JSpinner(new SpinnerDateModel());
+        tanggalSpinner.setEditor(new JSpinner.DateEditor(tanggalSpinner, "dd-MM-yyyy"));
+        menuComboBox = new JComboBox<>();
+        jumlahField = new JTextField();
+        tambahMenuBtn = new JButton("Tambah Menu");
+        tambahMenuBtn.addActionListener(this::tambahMenuKeDaftar);
+
+        formPanel.add(new JLabel("Nama Pemesan:"));
+        formPanel.add(namaField);
+        formPanel.add(new JLabel("No Handphone:"));
+        formPanel.add(noHpField);
+        formPanel.add(new JLabel("Tanggal Ambil:"));
+        formPanel.add(tanggalSpinner);
+        formPanel.add(new JLabel("Pilih Menu:"));
+        formPanel.add(menuComboBox);
+        formPanel.add(new JLabel("Jumlah:"));
+        formPanel.add(jumlahField);
+
+        JPanel atasPanel = new JPanel(new BorderLayout());
+        atasPanel.add(formPanel, BorderLayout.NORTH);
+        atasPanel.add(tambahMenuBtn, BorderLayout.SOUTH);
+        add(atasPanel, BorderLayout.NORTH);
+
+        tableModel = new DefaultTableModel(new String[]{"Nama Pemesan", "No Handphone", "Menu", "Jumlah", "Harga Satuan", "Total Harga"}, 0) {
+            public boolean isCellEditable(int row, int column) { return false; }
+            public Class<?> getColumnClass(int column) { return (column == 3) ? Integer.class : Object.class; }
+        };
+
+        daftarMenuTable = new JTable(tableModel);
+        add(new JScrollPane(daftarMenuTable), BorderLayout.CENTER);
+
+        JPanel bawahPanel = new JPanel(new BorderLayout());
+        totalHargaLabel = new JLabel("Total Harga: Rp 0");
+
+        lanjutTransaksiBtn = new JButton("Lanjutkan ke Transaksi");
+        lanjutTransaksiBtn.addActionListener(this::prosesPemesanan);
+
+        hapusMenuBtn = new JButton("Hapus Menu");
+        hapusMenuBtn.addActionListener(e -> hapusMenuDariDaftar());
+
+        JPanel tombolPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        tombolPanel.add(hapusMenuBtn);
+        tombolPanel.add(lanjutTransaksiBtn);
+
+        bawahPanel.add(totalHargaLabel, BorderLayout.WEST);
+        bawahPanel.add(tombolPanel, BorderLayout.EAST);
+        add(bawahPanel, BorderLayout.SOUTH);
+
+        connectDatabase();
+        loadMenuFromDatabase();
+        loadDraftPemesanan();
+
+        namaField.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { updateTotalHarga(); }
+            public void removeUpdate(DocumentEvent e) { updateTotalHarga(); }
+            public void changedUpdate(DocumentEvent e) { updateTotalHarga(); }
+        });
+    }
+
+    private void connectDatabase() {
+        try {
+            connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Gagal koneksi ke database: " + e.getMessage());
+        }
+    }
+
+    private void loadMenuFromDatabase() {
+        menuComboBox.removeAllItems();
+        menuHargaMap.clear();
+        String sql = "SELECT nama, harga FROM menu";
+        try (Statement stmt = connection.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                String nama = rs.getString("nama");
+                double harga = rs.getDouble("harga");
+                menuComboBox.addItem(nama);
+                menuHargaMap.put(nama, harga);
+            }
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Gagal memuat menu: " + e.getMessage());
+        }
+    }
+
+    private void loadDraftPemesanan() {
+        try (PreparedStatement stmt = connection.prepareStatement("SELECT nama, no_hp, menu, jumlah, tanggal_ambil FROM pemesanan WHERE status = 'Draft'")) {
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                String nama = rs.getString("nama");
+                String noHp = rs.getString("no_hp");
+                String menu = rs.getString("menu");
+                int jumlah = rs.getInt("jumlah");
+                double harga = menuHargaMap.getOrDefault(menu, 0.0);
+                tableModel.addRow(new Object[]{nama, noHp, menu, jumlah, harga, jumlah * harga});
+            }
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Gagal memuat draft pemesanan: " + e.getMessage());
+        }
+    }
+
+    private void tambahMenuKeDaftar(ActionEvent e) {
+        String nama = namaField.getText().trim();
+        String noHp = noHpField.getText().trim();
+        String menu = (String) menuComboBox.getSelectedItem();
+        String jumlahStr = jumlahField.getText().trim();
+
+        if (nama.isEmpty() || noHp.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Isi Nama dan No HP terlebih dahulu.");
+            return;
+        }
+
+        int jumlah;
+        try {
+            jumlah = Integer.parseInt(jumlahStr);
+            if (jumlah <= 0) throw new NumberFormatException();
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Jumlah harus berupa angka positif.");
+            return;
+        }
+
+        double harga = menuHargaMap.getOrDefault(menu, 0.0);
+        Date tanggal = (Date) tanggalSpinner.getValue();
+        java.sql.Date sqlTanggal = new java.sql.Date(tanggal.getTime());
+
+        tableModel.addRow(new Object[]{nama, noHp, menu, jumlah, harga, jumlah * harga});
+
+        try (PreparedStatement stmt = connection.prepareStatement("INSERT INTO pemesanan (nama, no_hp, menu, jumlah, tanggal_ambil, status) VALUES (?, ?, ?, ?, ?, 'Draft')")) {
+            stmt.setString(1, nama);
+            stmt.setString(2, noHp);
+            stmt.setString(3, menu);
+            stmt.setInt(4, jumlah);
+            stmt.setDate(5, sqlTanggal);
+            stmt.executeUpdate();
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this, "Gagal menyimpan ke database: " + ex.getMessage());
+        }
+
+        jumlahField.setText("");
+        updateTotalHarga();
+    }
+
+    private void hapusMenuDariDaftar() {
+        int selected = daftarMenuTable.getSelectedRow();
+        if (selected >= 0) {
+            String nama = (String) tableModel.getValueAt(selected, 0);
+            String menu = (String) tableModel.getValueAt(selected, 2);
+
+            try (PreparedStatement stmt = connection.prepareStatement("DELETE FROM pemesanan WHERE nama = ? AND menu = ? AND status = 'Draft'")) {
+                stmt.setString(1, nama);
+                stmt.setString(2, menu);
+                stmt.executeUpdate();
+            } catch (SQLException e) {
+                JOptionPane.showMessageDialog(this, "Gagal menghapus dari database: " + e.getMessage());
+            }
+
+            tableModel.removeRow(selected);
+            updateTotalHarga();
+        } else {
+            JOptionPane.showMessageDialog(this, "Pilih baris yang ingin dihapus.");
+        }
+    }
+
+    private void prosesPemesanan(ActionEvent e) {
+        int rowCount = tableModel.getRowCount();
+        if (rowCount == 0) {
+            JOptionPane.showMessageDialog(this, "Tidak ada pesanan untuk diproses.");
+            return;
+        }
+
+        try {
+            connection.setAutoCommit(false);
+            String sqlInsert = "INSERT INTO transaksi (nama, no_hp, menu, jumlah, harga_satuan, total_harga, tanggal_ambil, tanggal_transaksi, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Belum Bayar')";
+            String sqlUpdate = "UPDATE pemesanan SET status = 'Belum Bayar' WHERE nama = ? AND menu = ? AND status = 'Draft'";
+
+            try (PreparedStatement insertStmt = connection.prepareStatement(sqlInsert);
+                 PreparedStatement updateStmt = connection.prepareStatement(sqlUpdate)) {
+
+                for (int i = 0; i < rowCount; i++) {
+                    String nama = (String) tableModel.getValueAt(i, 0);
+                    String noHp = (String) tableModel.getValueAt(i, 1);
+                    String menu = (String) tableModel.getValueAt(i, 2);
+                    int jumlah = (int) tableModel.getValueAt(i, 3);
+                    double harga = (double) tableModel.getValueAt(i, 4);
+                    double total = (double) tableModel.getValueAt(i, 5);
+
+                    Date tanggal = (Date) tanggalSpinner.getValue();
+                    Timestamp now = new Timestamp(System.currentTimeMillis());
+
+                    insertStmt.setString(1, nama);
+                    insertStmt.setString(2, noHp);
+                    insertStmt.setString(3, menu);
+                    insertStmt.setInt(4, jumlah);
+                    insertStmt.setDouble(5, harga);
+                    insertStmt.setDouble(6, total);
+                    insertStmt.setDate(7, new java.sql.Date(tanggal.getTime()));
+                    insertStmt.setTimestamp(8, now);
+                    insertStmt.addBatch();
+
+                    updateStmt.setString(1, nama);
+                    updateStmt.setString(2, menu);
+                    updateStmt.addBatch();
+                }
+
+                insertStmt.executeBatch();
+                updateStmt.executeBatch();
+                connection.commit();
+            }
+
+            JOptionPane.showMessageDialog(this, "Pemesanan berhasil diproses.");
+            tableModel.setRowCount(0);
+            updateTotalHarga();
+
+        } catch (SQLException ex) {
+            try { connection.rollback(); } catch (SQLException ignore) {}
+            JOptionPane.showMessageDialog(this, "Gagal memproses pemesanan: " + ex.getMessage());
+        } finally {
+            try { connection.setAutoCommit(true); } catch (SQLException ignore) {}
+        }
+    }
+
+    private void updateTotalHarga() {
+        double total = 0;
+        for (int i = 0; i < tableModel.getRowCount(); i++) {
+            Object val = tableModel.getValueAt(i, 5);
+            if (val instanceof Number) {
+                total += ((Number) val).doubleValue();
+            }
+        }
+        totalHargaLabel.setText("Total Harga: Rp " + String.format("%,.0f", total).replace(",", "."));
+    }
+}
