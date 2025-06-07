@@ -1,0 +1,137 @@
+package Form;
+
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.io.File;
+import java.sql.*;
+import java.text.NumberFormat;
+import java.util.Locale;
+
+public class ProfilHistoryPanel extends JPanel {
+    private JLabel lblFoto;
+    private JLabel lblNama, lblTelepon, lblAlamat, lblDeskripsi;
+    private JTable tabelHistory;
+    private DefaultTableModel tableModel;
+
+    public ProfilHistoryPanel() {
+        setLayout(new BorderLayout(10, 10));
+        setBorder(new EmptyBorder(15, 15, 15, 15));
+
+        add(buildProfilePanel(), BorderLayout.NORTH);
+        add(new JSeparator(), BorderLayout.CENTER);
+        add(buildHistoryPanel(), BorderLayout.SOUTH);
+    }
+
+    private JPanel buildProfilePanel() {
+        JPanel panel = new JPanel(new BorderLayout(15, 10));
+        panel.setPreferredSize(new Dimension(1000, 250));
+
+        lblFoto = new JLabel();
+        lblFoto.setPreferredSize(new Dimension(250, 250));
+        panel.add(lblFoto, BorderLayout.WEST);
+
+        JPanel infoPanel = new JPanel(new GridLayout(4, 1));
+        lblNama = new JLabel("PINGKY CATERING");
+        lblNama.setFont(new Font("Arial", Font.BOLD, 20));
+
+        lblTelepon = new JLabel("Telepon: 085219527426");
+        lblTelepon.setFont(new Font("Arial", Font.PLAIN, 18));
+
+        lblAlamat = new JLabel("Alamat: Jl.taktakan kota serang");
+        lblAlamat.setFont(new Font("Arial", Font.PLAIN, 18));
+
+        lblDeskripsi = new JLabel("Deskripsi: U NO Eat u Died");
+        lblDeskripsi.setFont(new Font("Arial", Font.ITALIC, 18));
+
+        infoPanel.add(lblNama);
+        infoPanel.add(lblTelepon);
+        infoPanel.add(lblAlamat);
+        infoPanel.add(lblDeskripsi);
+
+        panel.add(infoPanel, BorderLayout.CENTER);
+
+        loadImageFromStaticPath();
+
+        return panel;
+    }
+
+    private JScrollPane buildHistoryPanel() {
+        tableModel = new DefaultTableModel(
+                new String[]{"Nama", "No HP", "Total Bayar", "Total Harga", "Tanggal", "Status", "Total Pemesanan", "Ambil"}, 0);
+        tabelHistory = new JTable(tableModel);
+        loadHistory();
+
+        JScrollPane scrollPane = new JScrollPane(tabelHistory);
+        scrollPane.setPreferredSize(new Dimension(1000, 350));
+        return scrollPane;
+    }
+
+    private void loadImageFromStaticPath() {
+        String fullPath = System.getProperty("user.dir") + File.separator + "gambar/image/Logo.jpg";
+        File imageFile = new File(fullPath);
+
+        if (imageFile.exists()) {
+            ImageIcon icon = new ImageIcon(fullPath);
+            Image img = icon.getImage().getScaledInstance(250, 250, Image.SCALE_SMOOTH);
+            lblFoto.setIcon(new ImageIcon(img));
+            lblFoto.setText("");
+        } else {
+            lblFoto.setIcon(null);
+            lblFoto.setText("Gambar tidak ditemukan");
+            System.out.println("File tidak ditemukan: " + fullPath);
+        }
+    }
+
+    private void loadHistory() {
+        NumberFormat formatRupiah = NumberFormat.getCurrencyInstance(new Locale("id", "ID"));
+        formatRupiah.setMinimumFractionDigits(0);
+        formatRupiah.setMaximumFractionDigits(0);
+
+        tableModel.setRowCount(0); // Clear previous data
+
+        String query = """
+                SELECT 
+                    l.nama, 
+                    l.no_hp,
+                    SUM(l.total_bayar) AS total_bayar,
+                    t.total_harga,
+                    MAX(l.tanggal_transaksi) AS tanggal_transaksi
+                FROM log_transaksi l
+                JOIN transaksi t ON l.nama = t.nama AND l.no_hp = t.no_hp
+                GROUP BY l.nama, l.no_hp, t.total_harga
+                ORDER BY tanggal_transaksi DESC
+                """;
+
+        try (Connection conn = DATABASE.Koneksi.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(query)) {
+
+            while (rs.next()) {
+                String nama = rs.getString("nama");
+                String noHp = rs.getString("no_hp").trim();
+                double totalBayar = rs.getDouble("total_bayar");
+                double totalHarga = rs.getDouble("total_harga");
+                Timestamp tanggal = rs.getTimestamp("tanggal_transaksi");
+
+                String status = totalBayar >= totalHarga ? "Lunas" : "Belum Lunas";
+                String ambil = status.equals("Lunas") ? "Ya" : "Tidak";
+
+                tableModel.addRow(new Object[]{
+                        nama,
+                        noHp,
+                        formatRupiah.format(totalBayar).replace("Rp", "Rp "),
+                        formatRupiah.format(totalHarga).replace("Rp", "Rp "),
+                        tanggal,
+                        status,
+                        1, // placeholder
+                        ambil
+                });
+            }
+
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Gagal load histori: " + e.getMessage());
+        }
+    }
+}
