@@ -1,0 +1,307 @@
+package Form;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.*;
+import java.io.IOException;
+import java.nio.file.*;
+import java.sql.*;
+import java.util.HashMap;
+import java.util.Map;
+
+public class TransaksiPanel extends JPanel {
+    private JList<String> listPemesan;
+    private DefaultListModel<String> listModel;
+    private JTable tableDetail;
+    private DefaultTableModel tableModel;
+    private JButton prosesBtn;
+    private JLabel labelInfo;
+    private Map<String, Boolean> mapBelumLunas = new HashMap<>();
+
+
+    private final String DB_URL = "jdbc:mysql://localhost:3306/db_catering";
+    private final String DB_USER = "root";
+    private final String DB_PASS = "";
+
+    private Connection connection;
+    private Map<String, String> mapNoHp = new HashMap<>();
+
+    public TransaksiPanel() {
+        setLayout(new BorderLayout(10, 10));
+        connectDatabase();
+
+        listModel = new DefaultListModel<>();
+        listPemesan = new JList<>(listModel);
+
+        JPanel panelList = new JPanel(new BorderLayout());
+        panelList.setPreferredSize(new Dimension(300, 0));
+        panelList.add(new JLabel("Daftar Pemesan", SwingConstants.CENTER), BorderLayout.NORTH);
+        panelList.add(new JScrollPane(listPemesan), BorderLayout.CENTER);
+        add(panelList, BorderLayout.WEST);
+
+        tableModel = new DefaultTableModel(
+                new String[]{"No HP", "Menu", "Jumlah", "Harga Satuan", "Total Harga", "Sudah Bayar", "Kekurangan"}, 0) {
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        tableDetail = new JTable(tableModel);
+
+        labelInfo = new JLabel("Info Pemesan: ");
+        labelInfo.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+
+        JPanel centerPanel = new JPanel(new BorderLayout());
+        centerPanel.add(labelInfo, BorderLayout.NORTH);
+        centerPanel.add(new JScrollPane(tableDetail), BorderLayout.CENTER);
+        add(centerPanel, BorderLayout.CENTER);
+
+        prosesBtn = new JButton("Proses Transaksi");
+        prosesBtn.addActionListener(this::prosesTransaksi);
+        add(prosesBtn, BorderLayout.SOUTH);
+
+        loadListPemesan();
+
+        listPemesan.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                String nama = listPemesan.getSelectedValue();
+                if (nama != null) {
+                    String noHp = mapNoHp.get(nama);
+                    labelInfo.setText("Info Pemesan: " + nama + " | No HP: " + noHp);
+                    loadDetailPemesanan(nama, noHp);
+                }
+            }
+        });
+    }
+
+    private void connectDatabase() {
+        try {
+            connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+        } catch (SQLException e) {
+            showError("Koneksi database gagal: " + e.getMessage());
+        }
+    }
+
+    private void loadListPemesan() {
+        listModel.clear();
+        mapNoHp.clear();
+        mapBelumLunas.clear();
+
+        String sql = "SELECT DISTINCT p.nama, p.no_hp, " +
+                "CASE WHEN (SELECT SUM(total_bayar) FROM log_transaksi l WHERE l.nama = p.nama AND l.no_hp = p.no_hp) >= " +
+                "       (SELECT SUM(pm.jumlah * m.harga) FROM pemesanan pm JOIN menu m ON pm.menu = m.nama WHERE pm.nama = p.nama AND pm.no_hp = p.no_hp) " +
+                "     THEN 0 ELSE 1 END AS belum_lunas " +
+                "FROM pemesanan p ORDER BY p.nama";
+
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                String nama = rs.getString("nama");
+                String noHp = rs.getString("no_hp");
+                boolean belumLunas = rs.getInt("belum_lunas") == 1;
+                listModel.addElement(nama);
+                mapNoHp.put(nama, noHp);
+                mapBelumLunas.put(nama, belumLunas);
+            }
+        } catch (SQLException e) {
+            showError("Gagal memuat daftar pemesan: " + e.getMessage());
+        }
+
+        listPemesan.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                String nama = (String) value;
+                if (mapBelumLunas.getOrDefault(nama, false)) {
+                    label.setForeground(Color.RED);
+                    label.setFont(label.getFont().deriveFont(Font.ITALIC));
+                } else {
+                    label.setForeground(Color.BLACK);
+                    label.setFont(label.getFont().deriveFont(Font.PLAIN));
+                }
+                return label;
+            }
+        });
+    }
+
+
+    private void loadDetailPemesanan(String nama, String noHp) {
+        tableModel.setRowCount(0);
+        String sql = "SELECT p.menu, p.jumlah, m.harga FROM pemesanan p JOIN menu m ON p.menu = m.nama WHERE p.nama = ? AND p.no_hp = ?";
+
+        try (PreparedStatement stmt = connection.prepareStatement(sql, ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY)) {
+            stmt.setString(1, nama);
+            stmt.setString(2, noHp);
+            ResultSet rs = stmt.executeQuery();
+
+            double totalHarga = 0;
+
+            // Hitung total harga
+            while (rs.next()) {
+                int jumlah = rs.getInt("jumlah");
+                double hargaSatuan = rs.getDouble("harga");
+                totalHarga += jumlah * hargaSatuan;
+            }
+
+            // Reset cursor ke awal
+            rs.beforeFirst();
+
+            double sudahBayar = totalTerbayar(nama, noHp);
+            double kekurangan = totalHarga - sudahBayar;
+
+            // Isi data ke tableModel
+            while (rs.next()) {
+                String menu = rs.getString("menu");
+                int jumlah = rs.getInt("jumlah");
+                double hargaSatuan = rs.getDouble("harga");
+                double subtotal = jumlah * hargaSatuan;
+
+                tableModel.addRow(new Object[]{
+                        noHp,
+                        menu,
+                        jumlah,
+                        hargaSatuan,
+                        subtotal,
+                        sudahBayar,
+                        kekurangan > 0 ? kekurangan : 0
+                });
+            }
+
+        } catch (SQLException e) {
+            showError("Gagal memuat detail pemesanan: " + e.getMessage());
+        }
+    }
+
+
+    private double totalTerbayar(String nama, String noHp) {
+        double total = 0;
+        String sql = "SELECT SUM(total_bayar) AS total_terbayar FROM log_transaksi WHERE nama = ? AND no_hp = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, nama);
+            ps.setString(2, noHp);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                total = rs.getDouble("total_terbayar");
+            }
+        } catch (SQLException e) {
+            // ignore
+        }
+        return total;
+    }
+
+    private void prosesTransaksi(ActionEvent e) {
+        String nama = listPemesan.getSelectedValue();
+        if (nama == null) {
+            showError("Pilih pemesan terlebih dahulu.");
+            return;
+        }
+
+        String noHp = mapNoHp.get(nama);
+
+        double totalHarga = 0;
+        for (int i = 0; i < tableModel.getRowCount(); i++) {
+            totalHarga += (double) tableModel.getValueAt(i, 4);
+        }
+
+        double totalTerbayar = totalTerbayar(nama, noHp);
+        double sisaBayar = totalHarga - totalTerbayar;
+
+        String input = JOptionPane.showInputDialog(this, String.format("Sisa bayar: %.2f\nMasukkan jumlah uang bayar:", sisaBayar));
+        if (input == null) return;
+
+        double uangBayar;
+        try {
+            uangBayar = Double.parseDouble(input);
+        } catch (NumberFormatException ex) {
+            showError("Nominal tidak valid.");
+            return;
+        }
+
+        double totalBayarSekarang = totalTerbayar + uangBayar;
+        double kembalian = 0;
+        String statusPembayaran;
+
+        if (totalBayarSekarang >= totalHarga) {
+            kembalian = totalBayarSekarang - totalHarga;
+            statusPembayaran = "Lunas";
+        } else {
+            sisaBayar = totalHarga - totalBayarSekarang;
+            statusPembayaran = "Belum Lunas";
+        }
+
+        String sqlInsertLog = "INSERT INTO log_transaksi (nama, no_hp, tanggal_transaksi, total_bayar) VALUES (?, ?, NOW(), ?)";
+        try (PreparedStatement psInsertLog = connection.prepareStatement(sqlInsertLog)) {
+            psInsertLog.setString(1, nama);
+            psInsertLog.setString(2, noHp);
+            psInsertLog.setDouble(3, uangBayar);
+            psInsertLog.executeUpdate();
+        } catch (SQLException ex) {
+            showError("Gagal menyimpan log transaksi: " + ex.getMessage());
+            return;
+        }
+
+        if (statusPembayaran.equals("Lunas")) {
+            // Hapus data pemesanan karena sudah lunas
+            String sqlDelete = "DELETE FROM pemesanan WHERE nama = ? AND no_hp = ?";
+            try (PreparedStatement psDelete = connection.prepareStatement(sqlDelete)) {
+                psDelete.setString(1, nama);
+                psDelete.setString(2, noHp);
+                psDelete.executeUpdate();
+            } catch (SQLException ex) {
+                showError("Gagal menghapus data pemesanan: " + ex.getMessage());
+                return;
+            }
+        }
+        // Tidak perlu update status jika belum lunas, cukup simpan log_transaksi
+
+        cetakStruk(nama, noHp, tableModel, uangBayar, kembalian, statusPembayaran);
+
+        JOptionPane.showMessageDialog(this,
+                String.format("Pembayaran berhasil!\nStatus: %s\nKembalian: %.2f", statusPembayaran, kembalian));
+
+        loadListPemesan();
+        tableModel.setRowCount(0);
+        labelInfo.setText("Info Pemesan:");
+    }
+
+    private void cetakStruk(String nama, String noHp, DefaultTableModel model, double bayar, double kembalian, String status) {
+        StringBuilder struk = new StringBuilder();
+        struk.append("===== STRUK TRANSAKSI =====\n");
+        struk.append("Nama   : ").append(nama).append("\n");
+        struk.append("No HP  : ").append(noHp).append("\n");
+        struk.append("---------------------------\n");
+        struk.append(String.format("%-15s %5s %10s\n", "Menu", "Qty", "Subtotal"));
+
+        double total = 0;
+        for (int i = 0; i < model.getRowCount(); i++) {
+            String menu = (String) model.getValueAt(i, 1);
+            int jumlah = (int) model.getValueAt(i, 2);
+            double subtotal = (double) model.getValueAt(i, 4);
+            total += subtotal;
+            struk.append(String.format("%-15s %5d %10.2f\n", menu, jumlah, subtotal));
+        }
+
+        struk.append("---------------------------\n");
+        struk.append(String.format("Total      : %.2f\n", total));
+        struk.append(String.format("Bayar      : %.2f\n", bayar));
+        if (kembalian > 0) {
+            struk.append(String.format("Kembalian  : %.2f\n", kembalian));
+        } else {
+            struk.append(String.format("Sisa Bayar : %.2f\n", total - bayar));
+        }
+        struk.append("Status     : ").append(status).append("\n");
+        struk.append("===========================\n");
+
+        try {
+            Path path = Paths.get(System.getProperty("user.home"), "Documents", "struk_transaksi.txt");
+            Files.write(path, struk.toString().getBytes());
+            JOptionPane.showMessageDialog(this, "Struk berhasil disimpan di: " + path.toString());
+        } catch (IOException e) {
+            showError("Gagal menyimpan struk: " + e.getMessage());
+        }
+    }
+
+    private void showError(String message) {
+        JOptionPane.showMessageDialog(this, message, "Error", JOptionPane.ERROR_MESSAGE);
+    }
+}
