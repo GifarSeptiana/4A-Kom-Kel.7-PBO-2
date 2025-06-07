@@ -1,0 +1,111 @@
+package Form;
+
+import javax.swing.*;
+import java.awt.*;
+import java.sql.*;
+
+public class RiwayatStruk extends JPanel {
+    private JList<String> listNama;
+    private DefaultListModel<String> listModel;
+    private JTextArea textStruk;
+    private JScrollPane scrollList, scrollText;
+
+    // Konfigurasi database
+    private final String DB_URL = "jdbc:mysql://localhost:3306/db_catering?useUnicode=true&characterEncoding=UTF-8";
+    private final String DB_USER = "root";
+    private final String DB_PASS = "";
+
+    private Connection connection;
+
+    public RiwayatStruk() {
+        setLayout(new BorderLayout(10, 10));
+        connectDatabase();
+        initComponents();
+        loadDaftarNama();
+    }
+
+    private void initComponents() {
+        // List nama customer
+        listModel = new DefaultListModel<>();
+        listNama = new JList<>(listModel);
+        scrollList = new JScrollPane(listNama);
+        scrollList.setPreferredSize(new Dimension(200, 0));
+        add(scrollList, BorderLayout.WEST);
+
+        // Area untuk menampilkan isi struk
+        textStruk = new JTextArea();
+        textStruk.setEditable(false);
+        textStruk.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        scrollText = new JScrollPane(textStruk);
+        add(scrollText, BorderLayout.CENTER);
+
+        // Listener saat item pada list diklik
+        listNama.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                String nama = listNama.getSelectedValue();
+                if (nama != null) {
+                    tampilkanStruk(nama);
+                }
+            }
+        });
+    }
+
+    private void connectDatabase() {
+        try {
+            connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+        } catch (SQLException e) {
+            showError("Gagal koneksi database: " + e.getMessage());
+        }
+    }
+
+    private void loadDaftarNama() {
+        listModel.clear();
+        String sql = "SELECT DISTINCT nama FROM log_transaksi ORDER BY tanggal DESC";
+
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                String nama = rs.getString("nama");
+                if (nama != null && !nama.trim().isEmpty()) {
+                    listModel.addElement(nama);
+                }
+            }
+
+        } catch (SQLException e) {
+            showError("Gagal memuat daftar nama: " + e.getMessage());
+        }
+    }
+
+    private void tampilkanStruk(String nama) {
+        textStruk.setText("");
+        String sql = "SELECT struk, tanggal FROM log_transaksi WHERE nama = ? ORDER BY tanggal DESC";
+
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setString(1, nama);
+            ResultSet rs = stmt.executeQuery();
+
+            StringBuilder builder = new StringBuilder();
+            while (rs.next()) {
+                String struk = rs.getString("struk");
+                Timestamp tanggal = rs.getTimestamp("tanggal");
+
+                builder.append("=== Transaksi Tanggal: ").append(tanggal).append(" ===\n");
+                builder.append(struk != null ? struk : "(struk kosong)").append("\n\n");
+            }
+
+            if (builder.length() == 0) {
+                builder.append("Belum ada struk untuk nama: ").append(nama);
+            }
+
+            textStruk.setText(builder.toString());
+
+        } catch (SQLException e) {
+            showError("Gagal menampilkan struk: " + e.getMessage());
+        }
+    }
+
+    private void showError(String pesan) {
+        JOptionPane.showMessageDialog(this, pesan, "Error", JOptionPane.ERROR_MESSAGE);
+    }
+}
